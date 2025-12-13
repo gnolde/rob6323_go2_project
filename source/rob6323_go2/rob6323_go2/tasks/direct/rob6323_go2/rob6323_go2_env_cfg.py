@@ -35,6 +35,8 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     Kp = 20.0  # Proportional gain
     Kd = 0.5   # Derivative gain
     torque_limits = 100.0  # Max torque
+    
+    base_height_min = 0.20
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
