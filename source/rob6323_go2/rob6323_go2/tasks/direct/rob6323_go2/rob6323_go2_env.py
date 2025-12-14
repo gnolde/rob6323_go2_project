@@ -52,7 +52,9 @@ class Rob6323Go2Env(DirectRLEnv):
                 "dof_vel",
                 "ang_vel_xy",
                 "feet_clearance",
-                "tracking_contacts_shaped_force"
+                "tracking_contacts_shaped_force",
+                "mean_torque",
+                "mean_friction"
             ]
         }
 
@@ -92,6 +94,11 @@ class Rob6323Go2Env(DirectRLEnv):
         self.gait_indices = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.clock_inputs = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)
         self.desired_contact_states = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)
+        
+        #Bonus - environment friction parameters
+        self.mu_v = torch.zeros(self.num_envs, 12, device=self.device)  # viscous
+        self.F_s  = torch.zeros(self.num_envs, 12, device=self.device)  # stiction
+
 
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
@@ -129,16 +136,30 @@ class Rob6323Go2Env(DirectRLEnv):
 
     def _apply_action(self) -> None:
         # Compute PD torques
-        torques = torch.clip(
-            (
-                self.Kp * (
-                    self.desired_joint_pos 
-                    - self.robot.data.joint_pos 
-                )
-                - self.Kd * self.robot.data.joint_vel
-            ),
-            -self.torque_limits,
-            self.torque_limits,
+        # torques = torch.clip(
+        #     (
+        #         self.Kp * (
+        #             self.desired_joint_pos 
+        #             - self.robot.data.joint_pos 
+        #         )
+        #         - self.Kd * self.robot.data.joint_vel
+        #     ),
+        #     -self.torque_limits,
+        #     self.torque_limits,
+        # )
+        
+        qdot = self.robot.data.joint_vel
+
+        # friction model
+        tau_stiction = self.F_s * torch.tanh(qdot / 0.1)
+        tau_viscous  = self.mu_v * qdot
+        tau_friction = tau_stiction + tau_viscous
+    
+        # PD + friction
+        torques = (
+            self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos)
+            - self.Kd * qdot
+            - tau_friction
         )
 
         # Apply torques to the robot
@@ -226,6 +247,12 @@ class Rob6323Go2Env(DirectRLEnv):
         # normalize by number of feet 
         rew_tracking_contacts_shaped_force /= 4.0
         
+        mean_torque = torch.mean(torch.abs(torques), dim=1)
+        mean_friction = torch.mean(torch.abs(tau_friction), dim=1)
+        
+        self._episode_sums["mean_torque"] += mean_torque
+        self._episode_sums["mean_friction"] += mean_friction
+        
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale, # Removed step_dt
             "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale, # Removed step_dt
@@ -269,6 +296,11 @@ class Rob6323Go2Env(DirectRLEnv):
         self._previous_actions[env_ids] = 0.0
         self.last_actions[env_ids] = 0.0
         self.gait_indices[env_ids] = 0
+        
+        #Bonus - randomize environment friction variables on reset
+        self.mu_v[env_ids] = torch.rand(len(env_ids), 12, device=self.device) * 0.3
+        self.F_s[env_ids]  = torch.rand(len(env_ids), 12, device=self.device) * 2.5
+
         
         # Sample new commands
         self._commands[env_ids] = torch.zeros_like(self._commands[env_ids]).uniform_(-1.0, 1.0)
