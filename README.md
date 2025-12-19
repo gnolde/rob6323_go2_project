@@ -165,3 +165,172 @@ The suggested way to inspect these logs is via the Open OnDemand web interface:
 
 ---
 Students should only edit README.md below this ligne.
+
+## Overview of Major Changes
+
+The project follows the tutorial structure and introduces the following major modifications. 
+
+### Part 1: Action Rate Penalty
+**What was changed:**  
+Action history was added to the environment, and penalties on first- and second-order action differences were introduced.
+
+**Why it was made:**  
+To reduce high-frequency, jerky joint commands and encourage temporally smooth control signals.
+
+**Observed effect:**  
+Motion becomes more regular in time, but joints remain stiff and overall stability is limited.
+
+---
+
+### Part 2: Low-Level PD Controller
+**What was changed:**  
+The default implicit PD controller was disabled and replaced with an explicit torque-level PD controller.
+
+**Why it was made:**  
+To gain direct control over joint torques and improve joint-level controllability and decoupling.
+
+**Observed effect:**  
+Legs are able to move more independently, but oscillations persist and locomotion remains unstable.
+
+---
+
+### Part 3: Early Termination Based on Base Height
+**What was changed:**  
+Episodes are terminated early if the robot’s base height drops below a threshold.
+
+**Why it was made:**  
+To prevent the policy from spending excessive time exploring catastrophic or collapsed states.
+
+**Observed effect:**  
+Overall stability improves, and highly unstable behaviors are quickly filtered out during training.
+
+---
+
+### Part 4: Raibert Heuristic for Gait Shaping
+**What was changed:**  
+A Raibert-style foot placement heuristic was introduced as a shaping reward, along with gait phase signals.
+
+**Why it was made:**  
+To encourage coordinated stepping patterns and structured gait emergence.
+
+**Observed effect:**  
+Leg motions become more coordinated and body oscillations are reduced, indicating the formation of a regular gait.
+
+---
+
+### Part 5: Additional Reward Shaping for Stability
+**What was changed:**  
+Additional penalties were added for body orientation, vertical velocity, joint velocity, and angular velocity.
+
+**Why it was made:**  
+To further constrain unstable motions and improve posture control.
+
+**Observed effect:**  
+Motion frequency increases while step amplitude decreases, leading to rapid but shallow steps and renewed oscillations.
+
+---
+
+### Part 6: Advanced Foot Interaction
+**What was changed:**  
+Foot clearance and contact force–based rewards were introduced to explicitly shape swing and stance behavior.
+
+**Why it was made:**  
+To resolve the trade-off between motion frequency and stability and encourage reliable foot–ground interaction.
+
+**Observed effect:**  
+The robot achieves fast and stable locomotion and can sustain different motion modes such as hopping and walking.
+
+---
+
+## Bonus 1 — Actuator Friction + Randomization (Detailed Code Changes)
+
+Bonus 1 extends the **torque-based PD controller from Part 2.3** by explicitly modeling joint friction and randomizing friction parameters at reset. It also logs friction-related statistics.
+
+### 1) `__init__`: add friction parameters
+
+```python
+# Bonus 1 - environment friction parameters
+self.mu_v = torch.zeros(self.num_envs, 12, device=self.device)  # viscous friction
+self.F_s  = torch.zeros(self.num_envs, 12, device=self.device)  # stiction friction
+```
+
+### 2) `_apply_action`: modify Part 2.3 PD control to PD + friction
+
+**Original baseline environment code:**
+```python
+def _apply_action(self) -> None:
+    self.robot.set_joint_position_target(self._processed_actions)
+```
+
+**Bonus 1 replaces the actuation path with PD + friction torques:**
+```python
+# Bonus part 1 starts
+qdot = self.robot.data.joint_vel
+
+# friction model
+tau_stiction = self.F_s * torch.tanh(qdot / 0.1)
+tau_viscous  = self.mu_v * qdot
+tau_friction = tau_stiction + tau_viscous
+
+# PD + friction
+torques = (
+    self.Kp * (self.desired_joint_pos - self.robot.data.joint_pos)
+    - self.Kd * qdot
+    - tau_friction
+)
+
+# store for logging
+self._last_torques = torques
+self._last_tau_friction = tau_friction
+
+# Apply torques to the robot
+self.robot.set_joint_effort_target(torques)
+```
+
+> **Comparison to Part 2.3:** Part 2.3 already uses torque-level PD control. Bonus 1 *extends* that controller by subtracting a friction torque term (`tau_friction`) computed from joint velocity (`qdot`) and randomized friction parameters (`mu_v`, `F_s`).
+
+### 3) `_get_rewards`: add logging of mean torque and mean friction
+
+```python
+# Bonus part 1
+mean_torque = torch.mean(torch.abs(self._last_torques), dim=1)
+mean_friction = torch.mean(torch.abs(self._last_tau_friction), dim=1)
+
+self._episode_sums["mean_torque"] += mean_torque
+self._episode_sums["mean_friction"] += mean_friction
+```
+
+### 4) `_reset_idx`: randomize friction parameters on reset
+
+```python
+# Bonus part 1 - randomize environment friction variables on reset
+self.mu_v[env_ids] = torch.rand(len(env_ids), 12, device=self.device) * 0.3
+self.F_s[env_ids]  = torch.rand(len(env_ids), 12, device=self.device) * 2.5
+```
+
+### Why Bonus 1 was made
+Real actuators experience internal resistance (static + viscous friction). Adding and randomizing friction makes simulation dynamics more realistic and improves robustness by forcing the policy to generalize across varying actuation conditions.
+
+### Observed effect
+
+The robot achieves fast and stable locomotion and can sustain different motion modes such as hopping and walking. Compared to the friction-free configuration (Part 6), forward speed is reduced at similar motion frequencies, indicating that part of the control effort is expended in overcoming internal friction rather than producing forward motion.
+
+---
+
+## How to Reproduce Results
+
+1. **Set up the environment**
+   - Follow the setup steps above.
+
+2. **Train each stage**
+   - Modify the code by following the `tutorial/tutorial.md`.
+   - Run the training script for each tutorial part (Part 1 → Part 6). The train method can be found above.
+
+3. **Run Bonus 1**
+   - Apply the Bonus 1 code changes in `rob6326_go2_env.py`:
+     - add `mu_v`, `F_s` in `__init__`,
+     - modify `_apply_action` to use PD + friction,
+     - add logging in `_get_rewards`,
+     - randomize friction in `_reset_idx`.
+
+---
