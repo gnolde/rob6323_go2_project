@@ -17,7 +17,7 @@ from isaaclab.sensors import ContactSensorCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 
-from isaaclab.actuators import ImplicitActuatorCfg
+from isaaclab.actuators import ImplicitActuatorCfg #Part 2.1
 
 @configclass
 class Rob6323Go2EnvCfg(DirectRLEnvCfg):
@@ -27,16 +27,17 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # - spaces definition
     action_scale = 0.25
     action_space = 12
-    observation_space = 48 + 4
+    observation_space = 48 + 4 #Part 4.1 - add 4 indices to observation space for clock inputs
     state_space = 0
     debug_vis = True
 
-    # PD control gains
-    Kp = 20.0  # Proportional gain
-    Kd = 0.5   # Derivative gain
+    # Part 2.1 - PD control gains
+    Kp = 20.0  # Proportional gain 
+    Kd = 0.5   # Derivative gain 
     torque_limits = 100.0  # Max torque
     
-    base_height_min = 0.20
+    # Part 3.1 - define min base height threshold for early termination
+    base_height_min = 0.20 #terminates is base height is lower than 20 cm
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
@@ -63,9 +64,8 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
         ),
         debug_vis=False,
     )
-    # robot(s)
+    # Part 2.1 - update robot_cfg
     robot_cfg: ArticulationCfg = UNITREE_GO2_CFG.replace(prim_path="/World/envs/env_.*/Robot")
-
     # "base_legs" is an arbitrary key we use to group these actuators
     robot_cfg.actuators["base_legs"] = ImplicitActuatorCfg(
         joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
@@ -97,19 +97,21 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # reward scales
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
+
+    #Part 1.1
     action_rate_reward_scale = -0.1
     
-    # part 4
+    # part 4.1 - defining reeward scales for raibert heuristic
     raibert_heuristic_reward_scale = -10.0
     feet_clearance_reward_scale = -30.0
     tracking_contacts_shaped_force_reward_scale = 4.0
     
-    #part 5
+    #part 5.1 - adding additional reward scales
     orient_reward_scale = -5.0
     lin_vel_z_reward_scale = -0.02
     dof_vel_reward_scale = -0.0001
     ang_vel_xy_reward_scale = -0.001
     
-    #part 6 - feet clearance and tracking
+    #part 6.1 - feet clearance and tracking reward scales
     feet_clearance_reward_scale = -30.0
     tracking_contacts_shaped_force_reward_scale = 4.0
