@@ -167,7 +167,11 @@ class Rob6323Go2Env(DirectRLEnv):
             - tau_friction
         )
 
-        # Apply torques to the robot - part 2.3 and 
+        # store for logging
+        self._last_torques = torques
+        self._last_tau_friction = tau_friction
+
+        # Apply torques to the robot - part 2.3 and bonus part 1
         self.robot.set_joint_effort_target(torques)
 
     def _get_observations(self) -> dict:
@@ -257,8 +261,8 @@ class Rob6323Go2Env(DirectRLEnv):
         rew_tracking_contacts_shaped_force /= 4.0
         
         # Bonus part 1
-        mean_torque = torch.mean(torch.abs(torques), dim=1)
-        mean_friction = torch.mean(torch.abs(tau_friction), dim=1)
+        mean_torque = torch.mean(torch.abs(self._last_torques), dim=1)
+        mean_friction = torch.mean(torch.abs(self._last_tau_friction), dim=1)
     
         self._episode_sums["mean_torque"] += mean_torque
         self._episode_sums["mean_friction"] += mean_friction
